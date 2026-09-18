@@ -66,22 +66,24 @@ export default function RoomSession({ roomId, userId, username, onJoinAsNew }) {
       <main className="room-grid">
         <VideoStage room={room} />
 
-        <aside className="sidebar panel">
+        <aside className={`sidebar card tab-${tab}`} aria-label="Room panel">
           <nav className="tabs" role="tablist">
             {tabs.map((t) => (
               <button
                 key={t.id}
+                id={`tab-${t.id}`}
                 role="tab"
                 aria-selected={tab === t.id}
+                aria-controls="tab-panel"
                 className={`tab ${tab === t.id ? 'is-active' : ''}`}
                 onClick={() => setTab(t.id)}
               >
-                {t.label}
+                <span>{t.label}</span>
                 {t.badge != null && <span className={`badge ${t.hot ? 'is-hot' : ''}`}>{t.badge}</span>}
               </button>
             ))}
           </nav>
-          <div className="tab-body">
+          <div className="tab-body" id="tab-panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
             {tab === 'people' && <ParticipantList room={room} />}
             {tab === 'chat' && <ChatPanel room={room} />}
             {tab === 'requests' && staff && <RequestsPanel room={room} />}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSyncedPlayer } from '../hooks/useSyncedPlayer.js';
 import { useVideoInfo } from '../hooks/useVideoInfo.js';
 import VideoPicker from './VideoPicker.jsx';
+import Icon from './Icon.jsx';
 import { canControl, canRequest } from '../lib/permissions.js';
 import { REACTIONS } from '../lib/events.js';
 import { formatTime } from '../lib/youtube.js';
@@ -67,8 +68,10 @@ export default function VideoStage({ room }) {
     ? `${syncState.by.userId === self.userId ? 'You' : syncState.by.username} ${ACTION_TEXT[syncState.action]}${syncState.action === 'seek' ? ` ${formatTime(syncState.currentTime)}` : ''}`
     : null;
 
+  const status = isPlaying ? 'Playing' : 'Paused';
+
   return (
-    <section className="stage">
+    <section className="stage" aria-label="Video">
       <div className="screen">
         <div className="player-mount" ref={player.containerRef} />
         {/* transparent shield: nobody clicks the iframe directly, all control goes through the server */}
@@ -92,7 +95,7 @@ export default function VideoStage({ room }) {
               disabled={disabled}
               aria-label={control ? 'Play' : 'Request play'}
             >
-              <svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" /></svg>
+              <Icon name="play" size={30} />
             </button>
             <span className="veil-label">
               {control ? 'Paused' : request ? 'Paused · tap to ask the host to play' : 'Paused by the host'}
@@ -101,7 +104,7 @@ export default function VideoStage({ room }) {
         )}
         {player.blocked && !player.playerError && (
           <button className="screen-overlay screen-unlock" onClick={player.unlock}>
-            <span className="unlock-icon">▶</span>
+            <span className="unlock-icon"><Icon name="play" size={28} /></span>
             <span>Tap to join playback</span>
             <small>Your browser blocked autoplay</small>
           </button>
@@ -118,73 +121,80 @@ export default function VideoStage({ room }) {
 
         {!control && (
           <div className="lock-banner">
+            <Icon name="lock" size={13} />
             {request ? 'Controls send a request to the host' : 'View only'}
           </div>
         )}
       </div>
 
-      <div className="controls panel">
+      <div className="controls card">
         <button
           className={`play-btn ${request ? 'is-request' : ''}`}
           onClick={togglePlay}
           disabled={disabled || !player.ready}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
-          title={request ? 'Request' : undefined}
+          aria-label={isPlaying ? (request ? 'Request pause' : 'Pause') : request ? 'Request play' : 'Play'}
+          title={request ? 'Sends a request' : undefined}
         >
-          {isPlaying ? (
-            <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
-          ) : (
-            <svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" /></svg>
-          )}
+          <Icon name={isPlaying ? 'pause' : 'play'} size={20} />
         </button>
 
-        <div className="timeline">
-          <span className="time">{formatTime(shownTime)}</span>
-          <input
-            type="range"
-            className="seek"
-            min={0}
-            max={Math.max(duration, 1)}
-            step={0.5}
-            value={Math.min(shownTime, Math.max(duration, 1))}
-            disabled={disabled || !duration}
-            style={{ '--pct': `${duration ? (shownTime / duration) * 100 : 0}%` }}
-            onChange={(e) => setScrub(Number(e.target.value))}
-            onPointerUp={commitSeek}
-            onKeyUp={commitSeek}
-            onBlur={() => setScrub(null)}
-            aria-label="Seek"
-          />
-          <span className="time muted">{formatTime(duration)}</span>
-        </div>
+        <input
+          type="range"
+          className="seek"
+          min={0}
+          max={Math.max(duration, 1)}
+          step={0.5}
+          value={Math.min(shownTime, Math.max(duration, 1))}
+          disabled={disabled || !duration}
+          style={{ '--pct': `${duration ? (shownTime / duration) * 100 : 0}%` }}
+          onChange={(e) => setScrub(Number(e.target.value))}
+          onPointerUp={commitSeek}
+          onKeyUp={commitSeek}
+          onBlur={() => setScrub(null)}
+          aria-label="Seek"
+          aria-valuetext={`${formatTime(shownTime)} of ${formatTime(duration)}`}
+        />
+
+        <span className="time">
+          {formatTime(shownTime)}
+          <span className="time-total"> / {formatTime(duration)}</span>
+        </span>
 
         <div className="volume">
           <button className="icon-btn" onClick={player.toggleMute} aria-label={player.muted ? 'Unmute' : 'Mute'}>
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 9h4l5-4v14l-5-4H4z" />
-              {player.muted || player.volume === 0 ? (
-                <path d="M16 9l5 6M21 9l-5 6" className="stroke" />
-              ) : (
-                <path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" className="stroke" />
-              )}
-            </svg>
+            <Icon name={player.muted || player.volume === 0 ? 'mute' : 'volume'} size={20} />
           </button>
-          <input type="range" min={0} max={100} value={player.muted ? 0 : player.volume} onChange={(e) => player.setVolume(Number(e.target.value))} aria-label="Volume" />
+          <input
+            type="range"
+            className="volume-range"
+            min={0}
+            max={100}
+            value={player.muted ? 0 : player.volume}
+            style={{ '--pct': `${player.muted ? 0 : player.volume}%` }}
+            onChange={(e) => player.setVolume(Number(e.target.value))}
+            aria-label="Volume"
+          />
         </div>
       </div>
 
       <div className="stage-info">
         <div className="now-playing">
-          <span className={`eq ${isPlaying ? 'is-on' : ''}`} aria-hidden="true"><i /><i /><i /></span>
-          <div>
-            <p className="np-title">{info?.title || player.title || 'Loading video…'}</p>
-            <p className="np-meta">
-              {info && <span className="np-channel">{info.channel} · {formatViews(info.views)} · </span>}
-              {last || (isPlaying ? 'Playing' : 'Paused')}
-            </p>
-          </div>
+          <h1 className="np-title">{info?.title || player.title || 'Loading video…'}</h1>
+          <p className="np-meta">
+            <span className={`status-pill ${isPlaying ? 'is-on' : ''}`}>
+              <span className="eq" aria-hidden="true"><i /><i /><i /></span>
+              {status}
+            </span>
+            {info && (
+              <>
+                <span className="np-channel">{info.channel}</span>
+                <span className="np-views">{formatViews(info.views)}</span>
+              </>
+            )}
+            {last && <span className="np-last">{last}</span>}
+          </p>
         </div>
-        <div className="reaction-bar">
+        <div className="reaction-bar" role="group" aria-label="Send a reaction">
           {REACTIONS.map((emoji) => (
             <button key={emoji} className="reaction-btn" onClick={() => actions.react(emoji)} aria-label={`React ${emoji}`}>
               {emoji}

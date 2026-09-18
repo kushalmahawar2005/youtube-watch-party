@@ -6,7 +6,7 @@ export default function Brand() {
       <span className="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" /></svg>
       </span>
-      watchparty<span className="brand-dot">.</span>
+      <span>watchparty<span className="brand-dot">.</span></span>
     </Link>
   );
 }

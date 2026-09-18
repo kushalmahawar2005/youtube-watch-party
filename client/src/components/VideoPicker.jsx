@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { extractVideoId, formatTime } from '../lib/youtube.js';
 import { formatViews, getConfig, searchVideos, timeAgo } from '../lib/youtubeApi.js';
+import Icon from './Icon.jsx';
 
 /**
  * One box for both: paste a YouTube link, or type words and press Enter to search.
@@ -71,10 +72,10 @@ export default function VideoPicker({ control, currentVideoId, onPick, notify })
   return (
     <div className="picker" ref={rootRef}>
       {open && (
-        <div className="picker-pop panel" role="dialog" aria-label="Search results">
+        <div className="picker-pop card" role="dialog" aria-label="Search results">
           <div className="picker-head">
             <span>{loading ? 'Searching YouTube…' : error ? 'Search failed' : `Results for “${lastQuery}”`}</span>
-            <button className="icon-btn" onClick={close} aria-label="Close results">✕</button>
+            <button className="icon-btn" onClick={close} aria-label="Close results"><Icon name="close" size={18} /></button>
           </div>
 
           {error && <p className="picker-note">{error}</p>}
@@ -111,19 +112,26 @@ export default function VideoPicker({ control, currentVideoId, onPick, notify })
         </div>
       )}
 
-      <form className="changer panel" onSubmit={submit}>
-        <span className="changer-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
-        </span>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={searchOn ? 'Search YouTube or paste a link…' : 'Paste a YouTube link…'}
-          aria-label={searchOn ? 'Search YouTube or paste a link' : 'YouTube link'}
-        />
-        <button className="btn btn-primary" type="submit" disabled={!text.trim() || loading}>
-          {extractVideoId(text) || !searchOn ? (control ? 'Play for everyone' : 'Request video') : 'Search'}
-        </button>
+      <form className="changer card" onSubmit={submit}>
+        <div className="changer-head">
+          <h2>{control ? 'Change video' : 'Suggest a video'}</h2>
+          <p>{control ? 'Plays for everyone in the room' : 'The host or a moderator approves it first'}</p>
+        </div>
+        <div className="changer-row">
+          <label className="changer-field">
+            <Icon name="search" size={18} className="changer-icon" />
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={searchOn ? 'Search YouTube or paste a link' : 'Paste a YouTube link'}
+              aria-label={searchOn ? 'Search YouTube or paste a link' : 'YouTube link'}
+              enterKeyHint={extractVideoId(text) || !searchOn ? 'go' : 'search'}
+            />
+          </label>
+          <button className="btn btn-primary" type="submit" disabled={!text.trim() || loading}>
+            {extractVideoId(text) || !searchOn ? (control ? 'Play for everyone' : 'Request video') : 'Search'}
+          </button>
+        </div>
       </form>
     </div>
   );

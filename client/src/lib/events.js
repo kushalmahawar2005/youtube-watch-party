@@ -14,6 +14,12 @@ export const C2S = Object.freeze({
   RESOLVE_REQUEST: 'resolve_request',
   CHAT_MESSAGE: 'chat_message',
   REACTION: 'reaction',
+  UPDATE_ROOM: 'update_room',
+  CANCEL_REQUEST: 'cancel_request',
+  ADD_TO_PLAYLIST: 'add_to_playlist',
+  REMOVE_FROM_PLAYLIST: 'remove_from_playlist',
+  PLAY_PLAYLIST_ITEM: 'play_playlist_item',
+  MOVE_PLAYLIST_ITEM: 'move_playlist_item',
 });
 
 export const S2C = Object.freeze({
@@ -31,6 +37,9 @@ export const S2C = Object.freeze({
   CHAT_MESSAGE: 'chat_message',
   REACTION: 'reaction',
   ERROR: 'error_message',
+  ROOM_UPDATED: 'room_updated',
+  REQUEST_CANCELLED: 'request_cancelled',
+  PLAYLIST_UPDATED: 'playlist_updated',
 });
 
 export const REACTIONS = ['🔥', '😂', '😮', '❤️', '👏', '😢'];

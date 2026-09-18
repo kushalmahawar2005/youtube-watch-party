@@ -3,6 +3,8 @@ import { RoomError } from '../errors.js';
 import { ACTIONS, ROLES, can, isStaff } from '../permissions.js';
 import {
   cleanChatText,
+  cleanRoomPassword,
+  cleanRoomTitle,
   cleanUsername,
   isValidTime,
   isValidUserId,
@@ -57,6 +59,12 @@ export class SocketHandler {
       [C2S.RESOLVE_REQUEST]: this.handleResolveRequest,
       [C2S.CHAT_MESSAGE]: this.handleChatMessage,
       [C2S.REACTION]: this.handleReaction,
+      [C2S.UPDATE_ROOM]: this.handleUpdateRoom,
+      [C2S.CANCEL_REQUEST]: this.handleCancelRequest,
+      [C2S.ADD_TO_PLAYLIST]: this.handleAddToPlaylist,
+      [C2S.REMOVE_FROM_PLAYLIST]: this.handleRemoveFromPlaylist,
+      [C2S.PLAY_PLAYLIST_ITEM]: this.handlePlayPlaylistItem,
+      [C2S.MOVE_PLAYLIST_ITEM]: this.handleMovePlaylistItem,
     };
 
     for (const [event, handler] of Object.entries(routes)) {
@@ -112,7 +120,7 @@ export class SocketHandler {
     if (!socket) return;
     if (isStaff(participant.role)) {
       socket.join(staffChannel(room.id));
-      socket.emit(S2C.REQUESTS_SNAPSHOT, { requests: room.listRequests() });
+      socket.emit(S2C.REQUESTS_SNAPSHOT, { requests: room.listRequests(), history: room.listRequestHistory() });
     } else {
       socket.leave(staffChannel(room.id));
     }
@@ -176,6 +184,7 @@ export class SocketHandler {
         });
       }
     }
+    this.rooms.persist();
   }
 
   /* ───────────── room lifecycle ───────────── */
@@ -187,13 +196,18 @@ export class SocketHandler {
     reply({ ok: true, roomId: room.id });
   }
 
-  handleJoinRoom(socket, { roomId, userId, username }, reply) {
+  handleJoinRoom(socket, { roomId, userId, username, password }, reply) {
     const name = cleanUsername(username);
     if (!name) throw new RoomError('INVALID_USERNAME', 'Please enter a name.');
     if (!isValidUserId(userId)) throw new RoomError('INVALID_USER', 'Invalid user id.');
 
     const room = this.rooms.getRoom(roomId);
     if (!room) throw new RoomError('ROOM_NOT_FOUND', `Room ${normalizeRoomId(roomId)} does not exist.`);
+    // Existing members may refresh without being prompted for the password again.
+    // New people must prove they know it before they get a seat in the room.
+    if (!room.getParticipant(userId) && !room.verifyPassword(password)) {
+      throw new RoomError('PASSWORD_REQUIRED', 'This room needs the correct password.');
+    }
 
     // already in a different room on this socket? leave it first
     if (socket.data.roomId && socket.data.roomId !== room.id) {
@@ -219,6 +233,7 @@ export class SocketHandler {
     socket.data.roomId = room.id;
     socket.data.userId = userId;
     this.#syncStaffChannel(room, participant);
+    this.rooms.persist();
 
     reply({
       ok: true,
@@ -226,6 +241,9 @@ export class SocketHandler {
       self: participant.toJSON(),
       participants: room.listParticipants(),
       chat: room.chat,
+      roomMeta: room.getMeta(),
+      myRequests: room.listRequests().filter((request) => request.userId === userId),
+      playlist: room.playlist,
     });
 
     // late joiners get the current video state immediately
@@ -242,6 +260,19 @@ export class SocketHandler {
     }
   }
 
+  handleUpdateRoom(socket, { title, emoji, password, removePassword }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    this.#authorize(me, ACTIONS.MANAGE_ROOM);
+    const cleanTitle = title === undefined ? null : cleanRoomTitle(title);
+    if (title !== undefined && !cleanTitle) throw new RoomError('INVALID_ROOM_TITLE', 'Room name must be 1–48 characters.');
+    const cleanPassword = password === undefined || password === '' ? null : cleanRoomPassword(password);
+    if (password !== undefined && password !== '' && !cleanPassword) throw new RoomError('INVALID_PASSWORD', 'Password must be 4–64 characters.');
+    const meta = room.updateMeta({ title: cleanTitle, emoji, password: cleanPassword, removePassword });
+    this.rooms.persist();
+    this.io.to(room.id).emit(S2C.ROOM_UPDATED, meta);
+    reply({ ok: true, roomMeta: meta });
+  }
+
   handleLeaveRoom(socket, _payload, reply) {
     const { room, me } = this.#requireMember(socket);
     this.#removeFromRoom(room, me.userId, 'left');
@@ -255,6 +286,7 @@ export class SocketHandler {
 
     // Keep their seat (and role) for a short grace period so a page refresh doesn't kick the host.
     me.disconnect();
+    this.rooms.persist();
     this.io.to(room.id).emit(S2C.PRESENCE_CHANGED, { participants: room.listParticipants() });
 
     me.disconnectTimer = setTimeout(() => {
@@ -287,6 +319,7 @@ export class SocketHandler {
         throw new RoomError('INVALID_ACTION', 'Unknown action.');
     }
     this.#broadcastState(room, type, by, extra);
+    this.rooms.persist();
   }
 
   #handlePlayback(socket, type, payload, reply) {
@@ -329,6 +362,7 @@ export class SocketHandler {
       by: { userId: me.userId, username: me.username },
       participants: room.listParticipants(),
     });
+    this.rooms.persist();
     reply({ ok: true });
   }
 
@@ -349,6 +383,7 @@ export class SocketHandler {
       by: { userId: me.userId, username: me.username },
       participants: room.listParticipants(),
     });
+    this.rooms.persist();
     reply({ ok: true });
   }
 
@@ -383,6 +418,7 @@ export class SocketHandler {
     }
 
     const request = room.createRequest(me, type, clean);
+    this.rooms.persist();
     this.io.to(staffChannel(room.id)).emit(S2C.REQUEST_CREATED, request);
     reply({ ok: true, requestId: request.id });
   }
@@ -406,8 +442,59 @@ export class SocketHandler {
       userId: request.userId,
       by: { userId: me.userId, username: me.username },
     };
+    room.addRequestHistory(request, { approved, by: me });
+    this.rooms.persist();
     this.io.to(staffChannel(room.id)).emit(S2C.REQUEST_RESOLVED, result);
     this.#socketOf(room.getParticipant(request.userId))?.emit(S2C.REQUEST_RESOLVED, result);
+    this.io.to(staffChannel(room.id)).emit(S2C.REQUESTS_SNAPSHOT, { requests: room.listRequests(), history: room.listRequestHistory() });
+    reply({ ok: true });
+  }
+
+  handleCancelRequest(socket, { requestId }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    const request = room.cancelRequest(requestId, me.userId);
+    const payload = { requestId: request.id, userId: me.userId, username: me.username };
+    this.rooms.persist();
+    this.io.to(staffChannel(room.id)).emit(S2C.REQUEST_CANCELLED, payload);
+    socket.emit(S2C.REQUEST_CANCELLED, payload);
+    reply({ ok: true });
+  }
+
+  handleAddToPlaylist(socket, { videoId }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    this.#authorize(me, ACTIONS.MANAGE_PLAYLIST);
+    if (!isValidVideoId(videoId)) throw new RoomError('INVALID_VIDEO', 'Invalid YouTube video id.');
+    room.addToPlaylist(videoId, me);
+    this.rooms.persist();
+    this.io.to(room.id).emit(S2C.PLAYLIST_UPDATED, { playlist: room.playlist });
+    reply({ ok: true });
+  }
+
+  handleRemoveFromPlaylist(socket, { itemId }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    this.#authorize(me, ACTIONS.MANAGE_PLAYLIST);
+    room.removeFromPlaylist(itemId);
+    this.rooms.persist();
+    this.io.to(room.id).emit(S2C.PLAYLIST_UPDATED, { playlist: room.playlist });
+    reply({ ok: true });
+  }
+
+  handlePlayPlaylistItem(socket, { itemId }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    this.#authorize(me, ACTIONS.MANAGE_PLAYLIST);
+    room.playPlaylistItem(itemId);
+    this.#broadcastState(room, 'change_video', me, { fromPlaylist: true });
+    this.rooms.persist();
+    this.io.to(room.id).emit(S2C.PLAYLIST_UPDATED, { playlist: room.playlist });
+    reply({ ok: true });
+  }
+
+  handleMovePlaylistItem(socket, { itemId, direction }, reply) {
+    const { room, me } = this.#requireMember(socket);
+    this.#authorize(me, ACTIONS.MANAGE_PLAYLIST);
+    room.movePlaylistItem(itemId, direction);
+    this.rooms.persist();
+    this.io.to(room.id).emit(S2C.PLAYLIST_UPDATED, { playlist: room.playlist });
     reply({ ok: true });
   }
 
@@ -419,6 +506,7 @@ export class SocketHandler {
     const clean = cleanChatText(text);
     if (!clean) throw new RoomError('INVALID_MESSAGE', 'Message is empty.');
     this.io.to(room.id).emit(S2C.CHAT_MESSAGE, room.addChatMessage(me, clean));
+    this.rooms.persist();
     reply({ ok: true });
   }
 

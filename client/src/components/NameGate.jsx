@@ -4,6 +4,7 @@ import { apiUrl } from '../lib/socket.js';
 
 export default function NameGate({ roomId, initialName, onSubmit }) {
   const [name, setName] = useState(initialName);
+  const [password, setPassword] = useState('');
   const [room, setRoom] = useState({ loading: true });
 
   useEffect(() => {
@@ -20,7 +21,7 @@ export default function NameGate({ roomId, initialName, onSubmit }) {
         className="panel ticket gate-card"
         onSubmit={(e) => {
           e.preventDefault();
-          if (name.trim()) onSubmit(name.trim());
+          if (name.trim()) onSubmit(name.trim(), password);
         }}
       >
         <p className="eyebrow">You're invited to</p>
@@ -34,6 +35,12 @@ export default function NameGate({ roomId, initialName, onSubmit }) {
           <span>Your name</span>
           <input autoFocus value={name} maxLength={24} placeholder="e.g. Rahul" onChange={(e) => setName(e.target.value)} />
         </label>
+        {room.isPrivate && (
+          <label className="field">
+            <span>Room password</span>
+            <input type="password" value={password} autoComplete="current-password" placeholder="Enter the room password" onChange={(e) => setPassword(e.target.value)} />
+          </label>
+        )}
         <button className="btn btn-primary btn-xl" type="submit" disabled={!name.trim() || room.notFound}>
           Enter room <span aria-hidden="true">→</span>
         </button>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import RoomSession from '../components/RoomSession.jsx';
 import NameGate from '../components/NameGate.jsx';
 import { getSavedName, getUserId, resetUserId, saveName } from '../lib/identity.js';
@@ -11,18 +11,23 @@ import { getSavedName, getUserId, resetUserId, saveName } from '../lib/identity.
  */
 export default function Room() {
   const { roomId } = useParams();
+  const location = useLocation();
   const saved = getSavedName();
   const [userId, setUserId] = useState(getUserId);
   const [username, setUsername] = useState(saved);
+  const [password, setPassword] = useState(location.state?.password || '');
+  const [gateComplete, setGateComplete] = useState(Boolean(location.state?.autoJoin));
 
-  if (!username) {
+  if (!gateComplete) {
     return (
       <NameGate
         roomId={roomId.toUpperCase()}
         initialName={saved}
-        onSubmit={(name) => {
+        onSubmit={(name, submittedPassword) => {
           saveName(name);
+          setPassword(submittedPassword);
           setUsername(name);
+          setGateComplete(true);
         }}
       />
     );
@@ -34,6 +39,12 @@ export default function Room() {
       roomId={roomId.toUpperCase()}
       userId={userId}
       username={username}
+      password={password}
+      startOnboarding={Boolean(location.state?.autoJoin)}
+      onRetryJoin={() => {
+        setPassword('');
+        setGateComplete(false);
+      }}
       onJoinAsNew={() => setUserId(resetUserId())}
     />
   );

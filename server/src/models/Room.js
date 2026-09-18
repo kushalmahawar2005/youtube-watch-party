@@ -1,10 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Participant } from './Participant.js';
 import { RoomError } from '../errors.js';
 import { ROLES, ASSIGNABLE_ROLES } from '../permissions.js';
 
 export const DEFAULT_VIDEO_ID = 'M7lc1UVf-VE'; // YouTube IFrame API demo video
 const MAX_CHAT_HISTORY = 100;
+const MAX_REQUEST_HISTORY = 30;
 const ROLE_ORDER = { host: 0, moderator: 1, participant: 2, viewer: 3 };
 
 /**
@@ -20,6 +21,11 @@ export class Room {
     this.kickedUserIds = new Set();
     this.chat = [];
     this.requests = new Map(); // requestId -> request
+    this.requestHistory = [];
+    this.playlist = [];
+    this.title = 'My watch party';
+    this.emoji = '🎬';
+    this.passwordHash = null;
 
     /**
      * Playback is stored as "position at time updatedAt".
@@ -37,6 +43,75 @@ export class Room {
 
   get size() {
     return this.participants.size;
+  }
+
+  get isPrivate() {
+    return Boolean(this.passwordHash);
+  }
+
+  getMeta() {
+    return { title: this.title, emoji: this.emoji, isPrivate: this.isPrivate };
+  }
+
+  toSnapshot() {
+    return {
+      id: this.id,
+      hostUserId: this.hostUserId,
+      createdAt: this.createdAt,
+      participants: [...this.participants.values()].map((p) => ({ userId: p.userId, username: p.username, role: p.role, joinedAt: p.joinedAt })),
+      kickedUserIds: [...this.kickedUserIds],
+      chat: this.chat,
+      requests: this.listRequests(),
+      requestHistory: this.requestHistory,
+      playlist: this.playlist,
+      title: this.title,
+      emoji: this.emoji,
+      passwordHash: this.passwordHash,
+      playback: this.playback,
+    };
+  }
+
+  static fromSnapshot(snapshot) {
+    if (!snapshot?.id || !snapshot?.hostUserId) return null;
+    const room = new Room(snapshot.id, snapshot.hostUserId);
+    room.createdAt = Number.isFinite(snapshot.createdAt) ? snapshot.createdAt : Date.now();
+    room.title = typeof snapshot.title === 'string' && snapshot.title ? snapshot.title : room.title;
+    room.emoji = typeof snapshot.emoji === 'string' && snapshot.emoji ? snapshot.emoji : room.emoji;
+    room.passwordHash = typeof snapshot.passwordHash === 'string' ? snapshot.passwordHash : null;
+    room.playback = snapshot.playback && typeof snapshot.playback === 'object' ? { ...room.playback, ...snapshot.playback, isPlaying: false, updatedAt: Date.now() } : room.playback;
+    room.kickedUserIds = new Set(Array.isArray(snapshot.kickedUserIds) ? snapshot.kickedUserIds : []);
+    room.chat = Array.isArray(snapshot.chat) ? snapshot.chat.slice(-MAX_CHAT_HISTORY) : [];
+    room.requests = new Map((Array.isArray(snapshot.requests) ? snapshot.requests : []).filter((r) => r?.id).map((r) => [r.id, r]));
+    room.requestHistory = Array.isArray(snapshot.requestHistory) ? snapshot.requestHistory.slice(0, MAX_REQUEST_HISTORY) : [];
+    room.playlist = Array.isArray(snapshot.playlist) ? snapshot.playlist.filter((item) => item?.id && item?.videoId) : [];
+    for (const data of Array.isArray(snapshot.participants) ? snapshot.participants : []) {
+      if (!data?.userId || !data?.username || !data?.role) continue;
+      const participant = new Participant(data);
+      participant.joinedAt = Number.isFinite(data.joinedAt) ? data.joinedAt : Date.now();
+      room.participants.set(participant.userId, participant);
+    }
+    return room;
+  }
+
+  updateMeta({ title, emoji, password, removePassword }) {
+    if (title) this.title = title;
+    if (emoji) this.emoji = emoji;
+    if (password) this.passwordHash = this.#hashPassword(password);
+    if (removePassword === true) this.passwordHash = null;
+    return this.getMeta();
+  }
+
+  verifyPassword(password) {
+    if (!this.passwordHash) return true;
+    if (typeof password !== 'string') return false;
+    const [salt, expected] = this.passwordHash.split(':');
+    const actual = scryptSync(password, salt, 32).toString('hex');
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(actual, 'hex'));
+  }
+
+  #hashPassword(password) {
+    const salt = randomBytes(16).toString('hex');
+    return `${salt}:${scryptSync(password, salt, 32).toString('hex')}`;
   }
 
   getParticipant(userId) {
@@ -217,7 +292,53 @@ export class Room {
     return request;
   }
 
+  cancelRequest(requestId, userId) {
+    const request = this.requests.get(requestId);
+    if (!request) throw new RoomError('REQUEST_NOT_FOUND', 'This request was already handled.');
+    if (request.userId !== userId) throw new RoomError('FORBIDDEN', 'You can only cancel your own request.');
+    this.requests.delete(requestId);
+    return request;
+  }
+
   listRequests() {
     return [...this.requests.values()];
+  }
+
+  addRequestHistory(request, { approved, by }) {
+    const item = { ...request, approved, resolvedAt: Date.now(), resolvedBy: { userId: by.userId, username: by.username } };
+    this.requestHistory.unshift(item);
+    if (this.requestHistory.length > MAX_REQUEST_HISTORY) this.requestHistory.pop();
+    return item;
+  }
+
+  listRequestHistory() {
+    return this.requestHistory;
+  }
+
+  addToPlaylist(videoId, participant) {
+    const item = { id: randomUUID(), videoId, addedAt: Date.now(), addedBy: { userId: participant.userId, username: participant.username } };
+    this.playlist.push(item);
+    return item;
+  }
+
+  removeFromPlaylist(itemId) {
+    const index = this.playlist.findIndex((item) => item.id === itemId);
+    if (index === -1) throw new RoomError('PLAYLIST_ITEM_NOT_FOUND', 'That video is no longer in the playlist.');
+    return this.playlist.splice(index, 1)[0];
+  }
+
+  playPlaylistItem(itemId) {
+    const item = this.removeFromPlaylist(itemId);
+    this.changeVideo(item.videoId);
+    return item;
+  }
+
+  movePlaylistItem(itemId, direction) {
+    const index = this.playlist.findIndex((item) => item.id === itemId);
+    if (index === -1) throw new RoomError('PLAYLIST_ITEM_NOT_FOUND', 'That video is no longer in the playlist.');
+    const target = direction === 'up' ? index - 1 : direction === 'down' ? index + 1 : -1;
+    if (target < 0 || target >= this.playlist.length) throw new RoomError('INVALID_PLAYLIST_MOVE', 'That video cannot move any further.');
+    [this.playlist[index], this.playlist[target]] = [this.playlist[target], this.playlist[index]];
+    return this.playlist;
   }
 }

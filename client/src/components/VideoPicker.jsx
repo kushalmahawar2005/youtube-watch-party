@@ -4,8 +4,7 @@ import { formatViews, getConfig, searchVideos, timeAgo } from '../lib/youtubeApi
 import Icon from './Icon.jsx';
 
 /**
- * One box for both: paste a YouTube link, or type words and press Enter to search.
- * Search runs on Enter only (each search costs 100 units of the daily API quota).
+ * One box for both: paste a YouTube link, or type words for debounced YouTube suggestions.
  */
 export default function VideoPicker({ control, currentVideoId, onPick, notify }) {
   const [text, setText] = useState('');
@@ -15,6 +14,8 @@ export default function VideoPicker({ control, currentVideoId, onPick, notify })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const rootRef = useRef(null);
+  const searchSeq = useRef(0);
+  const suggestionTimer = useRef(null);
 
   useEffect(() => {
     getConfig().then((cfg) => setSearchOn(cfg.youtubeSearch));
@@ -45,26 +46,55 @@ export default function VideoPicker({ control, currentVideoId, onPick, notify })
     close();
   }
 
+  async function search(query) {
+    const seq = ++searchSeq.current;
+    setLoading(true);
+    setError('');
+    setLastQuery(query);
+    try {
+      const items = await searchVideos(query);
+      if (seq === searchSeq.current) setResults(items);
+    } catch (err) {
+      if (seq === searchSeq.current) {
+        setResults(null);
+        setError(err.message);
+      }
+    } finally {
+      if (seq === searchSeq.current) setLoading(false);
+    }
+  }
+
+  // Suggestions appear shortly after typing stops. The debounce avoids burning the
+  // YouTube API quota for every keystroke while still feeling instant.
+  useEffect(() => {
+    const value = text.trim();
+    if (!searchOn || value.length < 2 || extractVideoId(value)) return undefined;
+    const timer = setTimeout(() => {
+      suggestionTimer.current = null;
+      search(value);
+    }, 450);
+    suggestionTimer.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (suggestionTimer.current === timer) suggestionTimer.current = null;
+    };
+  }, [text, searchOn]); // search intentionally reads the newest request sequence
+
   async function submit(e) {
     e.preventDefault();
     const value = text.trim();
     if (!value) return;
 
+    if (suggestionTimer.current) {
+      clearTimeout(suggestionTimer.current);
+      suggestionTimer.current = null;
+    }
+
     const linkId = extractVideoId(value);
     if (linkId) return pick(linkId);
     if (!searchOn) return notify('That does not look like a YouTube link', 'bad');
 
-    setLoading(true);
-    setError('');
-    setLastQuery(value);
-    try {
-      setResults(await searchVideos(value));
-    } catch (err) {
-      setResults(null);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    search(value);
   }
 
   const verb = control ? 'Play' : 'Request';
@@ -115,21 +145,26 @@ export default function VideoPicker({ control, currentVideoId, onPick, notify })
       <form className="changer card" onSubmit={submit}>
         <div className="changer-head">
           <h2>{control ? 'Change video' : 'Suggest a video'}</h2>
-          <p>{control ? 'Plays for everyone in the room' : 'The host or a moderator approves it first'}</p>
+          <p>{control ? 'Suggestions appear as you type · plays for everyone' : 'Suggestions appear as you type · host approval is needed'}</p>
         </div>
         <div className="changer-row">
           <label className="changer-field">
             <Icon name="search" size={18} className="changer-icon" />
             <input
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                searchSeq.current += 1; // ignore any in-flight result for the previous words
+                setText(e.target.value);
+                setResults(null);
+                setError('');
+              }}
               placeholder={searchOn ? 'Search YouTube or paste a link' : 'Paste a YouTube link'}
               aria-label={searchOn ? 'Search YouTube or paste a link' : 'YouTube link'}
               enterKeyHint={extractVideoId(text) || !searchOn ? 'go' : 'search'}
             />
           </label>
           <button className="btn btn-primary" type="submit" disabled={!text.trim() || loading}>
-            {extractVideoId(text) || !searchOn ? (control ? 'Play for everyone' : 'Request video') : 'Search'}
+            {extractVideoId(text) || !searchOn ? (control ? 'Play for everyone' : 'Request video') : 'Search now'}
           </button>
         </div>
       </form>

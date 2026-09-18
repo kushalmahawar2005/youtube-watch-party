@@ -16,6 +16,7 @@ export default function Home() {
   const navigate = useNavigate();
   const [name, setName] = useState(getSavedName());
   const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState('');
 
@@ -51,7 +52,7 @@ export default function Home() {
       const res = await fetch(apiUrl(`/api/rooms/${roomId}`));
       if (res.status === 404) return setError(`Room ${roomId} not found. Check the code.`);
       if (!res.ok) throw new Error();
-      navigate(`/room/${roomId}`, { state: { autoJoin: true } });
+      navigate(`/room/${roomId}`, { state: { autoJoin: true, password } });
     } catch {
       setError('Server not reachable. Try again.');
     } finally {
@@ -117,6 +118,10 @@ export default function Home() {
               {busy === 'join' ? '…' : 'Join'}
             </button>
           </form>
+          <label className="join-password">
+            <span>Password, if this room has one</span>
+            <input type="password" value={password} autoComplete="current-password" placeholder="Optional room password" onChange={(e) => setPassword(e.target.value)} />
+          </label>
 
           {error && <p className="form-error" role="alert">{error}</p>}
         </section>

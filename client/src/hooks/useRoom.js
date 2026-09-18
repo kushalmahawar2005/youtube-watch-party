@@ -10,16 +10,20 @@ let toastSeq = 0;
  * connecting, joining, listening to server events and exposing actions.
  * Components never touch the socket directly.
  */
-export function useRoom({ roomId, userId, username }) {
+export function useRoom({ roomId, userId, username, password = '' }) {
   const [status, setStatus] = useState('connecting'); // connecting | joined | reconnecting | error | kicked | replaced | left
   const [error, setError] = useState(null);
   const [participants, setParticipants] = useState([]);
   const [syncState, setSyncState] = useState(null);
   const [chat, setChat] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [requestHistory, setRequestHistory] = useState([]);
+  const [playlist, setPlaylist] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [reactions, setReactions] = useState([]);
   const [unreadChat, setUnreadChat] = useState(0);
+  const [myRequests, setMyRequests] = useState([]);
+  const [roomMeta, setRoomMeta] = useState(null);
   const chatOpenRef = useRef(false);
 
   const notify = useCallback((text, tone = 'info') => {
@@ -33,7 +37,7 @@ export function useRoom({ roomId, userId, username }) {
 
   useEffect(() => {
     const join = async () => {
-      const res = await emitWithAck(C2S.JOIN_ROOM, { roomId, userId, username });
+      const res = await emitWithAck(C2S.JOIN_ROOM, { roomId, userId, username, password });
       if (!res.ok) {
         if (res.error?.code === 'KICKED') setStatus('kicked');
         else {
@@ -44,6 +48,9 @@ export function useRoom({ roomId, userId, username }) {
       }
       setParticipants(res.participants);
       setChat(res.chat);
+      setRoomMeta(res.roomMeta);
+      setMyRequests(res.myRequests || []);
+      setPlaylist(res.playlist || []);
       setStatus('joined');
     };
 
@@ -54,7 +61,8 @@ export function useRoom({ roomId, userId, username }) {
       [S2C.SYNC_STATE]: (state) => {
         setSyncState(state);
         const who = state.by && state.by.userId !== userId ? state.by.username : null;
-        if (who && state.requestedBy?.userId === userId) notify(`${who} approved your ${state.action.replace('_', ' ')} request`, 'good');
+        if (state.fromPlaylist) notify('Up next is now playing', 'accent');
+        else if (who && state.requestedBy?.userId === userId) notify(`${who} approved your ${state.action.replace('_', ' ')} request`, 'good');
         else if (who && state.action === 'change_video') notify(`${who} changed the video`);
       },
       [S2C.USER_JOINED]: (d) => {
@@ -79,15 +87,28 @@ export function useRoom({ roomId, userId, username }) {
       [S2C.KICKED]: () => setStatus('kicked'),
       [S2C.SESSION_REPLACED]: () => setStatus('replaced'),
 
-      [S2C.REQUESTS_SNAPSHOT]: (d) => setRequests(d.requests),
+      [S2C.REQUESTS_SNAPSHOT]: (d) => {
+        setRequests(d.requests);
+        setRequestHistory(d.history || []);
+      },
       [S2C.REQUEST_CREATED]: (req) => {
         setRequests((r) => [...r.filter((x) => x.id !== req.id && !(x.userId === req.userId && x.type === req.type)), req]);
         notify(`${req.username} sent a request`, 'accent');
       },
       [S2C.REQUEST_RESOLVED]: (d) => {
         setRequests((r) => r.filter((x) => x.id !== d.requestId));
+        if (d.userId === userId) setMyRequests((r) => r.filter((x) => x.id !== d.requestId));
         if (d.userId === userId && !d.approved) notify(`${d.by.username} declined your request`, 'bad');
       },
+      [S2C.REQUEST_CANCELLED]: (d) => {
+        setRequests((r) => r.filter((x) => x.id !== d.requestId));
+        if (d.userId === userId) {
+          setMyRequests((r) => r.filter((x) => x.id !== d.requestId));
+          notify('Request cancelled');
+        }
+      },
+      [S2C.ROOM_UPDATED]: (meta) => setRoomMeta(meta),
+      [S2C.PLAYLIST_UPDATED]: (data) => setPlaylist(data.playlist || []),
 
       [S2C.CHAT_MESSAGE]: (msg) => {
         setChat((c) => [...c.slice(-99), msg]);
@@ -110,7 +131,7 @@ export function useRoom({ roomId, userId, username }) {
       for (const [event, fn] of Object.entries(handlers)) socket.off(event, fn);
       socket.disconnect(); // server keeps our seat for a grace period
     };
-  }, [roomId, userId, username, notify]);
+  }, [roomId, userId, username, password, notify]);
 
   const actions = useMemo(
     () => ({
@@ -123,12 +144,21 @@ export function useRoom({ roomId, userId, username }) {
       removeParticipant: (targetId) => emitWithAck(C2S.REMOVE_PARTICIPANT, { userId: targetId }),
       requestAction: async (type, payload) => {
         const res = await emitWithAck(C2S.REQUEST_ACTION, { type, payload });
-        if (res.ok) notify('Request sent to host & moderators', 'accent');
+        if (res.ok) {
+          setMyRequests((r) => [...r.filter((x) => x.type !== type), { id: res.requestId, type, createdAt: Date.now() }]);
+          notify('Request sent to host & moderators', 'accent');
+        }
         return res;
       },
       resolveRequest: (requestId, approve) => emitWithAck(C2S.RESOLVE_REQUEST, { requestId, approve }),
       sendChat: (text) => emitWithAck(C2S.CHAT_MESSAGE, { text }),
       react: (emoji) => emitWithAck(C2S.REACTION, { emoji }),
+      updateRoom: (payload) => emitWithAck(C2S.UPDATE_ROOM, payload),
+      cancelRequest: (requestId) => emitWithAck(C2S.CANCEL_REQUEST, { requestId }),
+      addToPlaylist: (videoId) => emitWithAck(C2S.ADD_TO_PLAYLIST, { videoId }),
+      removeFromPlaylist: (itemId) => emitWithAck(C2S.REMOVE_FROM_PLAYLIST, { itemId }),
+      playPlaylistItem: (itemId) => emitWithAck(C2S.PLAY_PLAYLIST_ITEM, { itemId }),
+      movePlaylistItem: (itemId, direction) => emitWithAck(C2S.MOVE_PLAYLIST_ITEM, { itemId, direction }),
       leave: async () => {
         await emitWithAck(C2S.LEAVE_ROOM, {}, 2000);
         setStatus('left');
@@ -148,11 +178,15 @@ export function useRoom({ roomId, userId, username }) {
     self,
     participants,
     syncState,
+    roomMeta,
     chat,
     requests,
+    requestHistory,
+    playlist,
     toasts,
     reactions,
     unreadChat,
+    myRequests,
     setChatOpen,
     nameOf,
     notify,

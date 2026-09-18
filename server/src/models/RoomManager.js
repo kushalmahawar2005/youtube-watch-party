@@ -7,14 +7,20 @@ const CODE_LENGTH = 6;
 
 /** Keeps every active room in memory (a Map). One instance per server process. */
 export class RoomManager {
-  constructor() {
+  constructor({ snapshots = [], onChange = null } = {}) {
     this.rooms = new Map(); // roomId -> Room
+    this.onChange = onChange;
+    for (const snapshot of snapshots) {
+      const room = Room.fromSnapshot(snapshot);
+      if (room) this.rooms.set(room.id, room);
+    }
   }
 
   createRoom(hostUserId) {
     const id = this.#generateUniqueCode();
     const room = new Room(id, hostUserId);
     this.rooms.set(id, room);
+    this.persist();
     return room;
   }
 
@@ -23,7 +29,13 @@ export class RoomManager {
   }
 
   deleteRoom(roomId) {
-    return this.rooms.delete(normalizeRoomId(roomId));
+    const deleted = this.rooms.delete(normalizeRoomId(roomId));
+    if (deleted) this.persist();
+    return deleted;
+  }
+
+  persist() {
+    this.onChange?.([...this.rooms.values()].map((room) => room.toSnapshot()));
   }
 
   stats() {

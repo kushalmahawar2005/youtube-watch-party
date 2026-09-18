@@ -14,12 +14,13 @@ const EMBED_ERRORS = { 2: 'Invalid video id.', 5: 'HTML5 player error.', 100: 'V
  * client (including the one who clicked) applies it here. Because we never
  * emit from onStateChange there is no echo loop.
  */
-export function useSyncedPlayer(syncState) {
+export function useSyncedPlayer(syncState, { onEnded } = {}) {
   const containerRef = useRef(null);
   const playerRef = useRef(null);
   const readyRef = useRef(false);
   const syncRef = useRef(null); // { state, receivedAt }
   const stuckSinceRef = useRef(null);
+  const onEndedRef = useRef(onEnded);
 
   const [ready, setReady] = useState(false);
   const [time, setTime] = useState(0);
@@ -31,6 +32,8 @@ export function useSyncedPlayer(syncState) {
   const [volume, setVolumeState] = useState(80);
   const [playbackRate, setPlaybackRateState] = useState(1);
   const hasState = Boolean(syncState);
+
+  useEffect(() => { onEndedRef.current = onEnded; }, [onEnded]);
 
   /** Where the video SHOULD be right now, based on the last server update. */
   const expectedTime = useCallback(() => {
@@ -109,6 +112,7 @@ export function useSyncedPlayer(syncState) {
               setBlocked(false);
               stuckSinceRef.current = null;
             }
+            if (e.data === YT_STATE.ENDED) onEndedRef.current?.();
             setTitle(player.getVideoData?.()?.title || '');
           },
           onError: (e) => setPlayerError(EMBED_ERRORS[e.data] || 'This video cannot be played.'),

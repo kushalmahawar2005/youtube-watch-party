@@ -22,6 +22,8 @@ export const ACTIONS = Object.freeze({
   RESOLVE_REQUEST: 'resolve_request', // approve / reject a participant's request
   REQUEST_CHANGE: 'request_change', // ask host/mod to play, pause, seek or change video
   CHAT: 'chat', // chat + emoji reactions
+  MANAGE_ROOM: 'manage_room', // title / emoji / access password
+  MANAGE_PLAYLIST: 'manage_playlist',
 });
 
 const PERMISSIONS = Object.freeze({

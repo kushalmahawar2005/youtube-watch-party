@@ -30,9 +30,9 @@ function RequestedVideo({ videoId }) {
 }
 
 export default function RequestsPanel({ room }) {
-  const { requests, actions } = room;
+  const { requests, requestHistory, actions } = room;
 
-  if (requests.length === 0) {
+  if (requests.length === 0 && requestHistory.length === 0) {
     return (
       <div className="empty">
         <p>No pending requests</p>
@@ -42,19 +42,22 @@ export default function RequestsPanel({ room }) {
   }
 
   return (
-    <ul className="requests">
-      {requests.map((req) => (
-        <li key={req.id} className="request">
-          {req.type === 'change_video' && <RequestedVideo videoId={req.payload.videoId} />}
-          <p>
-            <b>{req.username}</b> {describe(req)}
-          </p>
-          <div className="req-actions">
-            <button className="btn btn-primary btn-sm" onClick={() => actions.resolveRequest(req.id, true)}>Approve</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => actions.resolveRequest(req.id, false)}>Decline</button>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="request-queue">
+      {requests.length > 0 && <><p className="queue-label">Pending · {requests.length}</p><ul className="requests">
+        {requests.map((req) => (
+          <li key={req.id} className="request">
+            {req.type === 'change_video' && <RequestedVideo videoId={req.payload.videoId} />}
+            <p><b>{req.username}</b> {describe(req)}</p>
+            <div className="req-actions">
+              <button className="btn btn-primary btn-sm" onClick={() => actions.resolveRequest(req.id, true)}>Approve</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => actions.resolveRequest(req.id, false)}>Decline</button>
+            </div>
+          </li>
+        ))}
+      </ul></>}
+      {requestHistory.length > 0 && <><p className="queue-label">Recent decisions</p><ul className="request-history">
+        {requestHistory.map((req) => <li key={req.id}><span>{req.approved ? 'Approved' : 'Declined'}</span><p><b>{req.username}</b> {describe(req)}</p></li>)}
+      </ul></>}
+    </div>
   );
 }

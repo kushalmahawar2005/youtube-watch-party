@@ -22,4 +22,15 @@ export function cleanChatText(text) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function cleanRoomTitle(title) {
+  if (typeof title !== 'string') return null;
+  const trimmed = title.replace(/\s+/g, ' ').trim().slice(0, 48);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function cleanRoomPassword(password) {
+  if (typeof password !== 'string') return null;
+  return password.length >= 4 && password.length <= 64 ? password : null;
+}
+
 export const normalizeRoomId = (id) => (typeof id === 'string' ? id.trim().toUpperCase() : '');

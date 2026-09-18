@@ -2,7 +2,7 @@ import Brand from './Brand.jsx';
 import RoleChip from './RoleChip.jsx';
 import Icon from './Icon.jsx';
 
-export default function RoomHeader({ roomId, self, status, onLeave, notify }) {
+export default function RoomHeader({ roomId, self, status, onLeave, notify, roomMeta }) {
   const inviteLink = `${window.location.origin}/room/${roomId}`;
 
   async function copy(text, label) {
@@ -14,9 +14,25 @@ export default function RoomHeader({ roomId, self, status, onLeave, notify }) {
     }
   }
 
+  async function shareInvite() {
+    if (!navigator.share) return copy(inviteLink, 'Invite link');
+    try {
+      await navigator.share({
+        title: 'Join my watch party',
+        text: `Join my YouTube watch party. Room code: ${roomId}`,
+        url: inviteLink,
+      });
+    } catch (err) {
+      // Closing the native share sheet is not an error worth showing.
+      if (err?.name !== 'AbortError') copy(inviteLink, 'Invite link');
+    }
+  }
+
   return (
     <header className="room-top">
       <Brand />
+
+      {roomMeta && <span className="room-title" title={roomMeta.title}>{roomMeta.emoji} {roomMeta.title}{roomMeta.isPrivate && <Icon name="lock" size={14} />}</span>}
 
       <div className="invite" aria-label="Invite people">
         <button className="code-chip" onClick={() => copy(roomId, 'Room code')} title="Copy room code">
@@ -28,6 +44,11 @@ export default function RoomHeader({ roomId, self, status, onLeave, notify }) {
           <Icon name="link" size={16} />
           <span>Copy invite</span>
         </button>
+        {'share' in navigator && (
+          <button className="icon-btn share-btn" onClick={shareInvite} aria-label="Share invite" title="Share invite">
+            <Icon name="share" size={18} />
+          </button>
+        )}
       </div>
 
       <div className="room-me">

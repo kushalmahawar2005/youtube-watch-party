@@ -8,6 +8,7 @@ import { Server } from 'socket.io';
 import { RoomManager } from './models/RoomManager.js';
 import { SocketHandler } from './socket/SocketHandler.js';
 import { YouTubeService, YouTubeError } from './services/YouTubeService.js';
+import { RoomStore } from './services/RoomStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
@@ -17,11 +18,12 @@ const CLIENT_DIST = path.resolve(__dirname, '../../client/dist');
  * In production Express also serves the built React app, so frontend and
  * WebSocket share one origin (no CORS issues, one deploy).
  */
-export function createApp({ corsOrigin = true, socketOptions = {}, youtube = new YouTubeService(process.env.YOUTUBE_API_KEY) } = {}) {
+export function createApp({ corsOrigin = true, socketOptions = {}, youtube = new YouTubeService(process.env.YOUTUBE_API_KEY), persistencePath = process.env.ROOM_DATA_FILE || path.resolve(__dirname, '../../data/rooms.json') } = {}) {
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server, { cors: { origin: corsOrigin }, pingInterval: 10_000, pingTimeout: 8_000 });
-  const roomManager = new RoomManager();
+  const roomStore = new RoomStore(persistencePath);
+  const roomManager = new RoomManager({ snapshots: roomStore.load(), onChange: (rooms) => roomStore.save(rooms) });
 
   new SocketHandler(io, roomManager, socketOptions).attach();
 
@@ -37,7 +39,7 @@ export function createApp({ corsOrigin = true, socketOptions = {}, youtube = new
     const room = roomManager.getRoom(req.params.roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     const host = room.getParticipant(room.hostUserId);
-    res.json({ roomId: room.id, participantCount: room.size, hostName: host?.username ?? null });
+    res.json({ roomId: room.id, participantCount: room.size, hostName: host?.username ?? null, ...room.getMeta() });
   });
 
   // Feature flags for the client (search box is hidden when no API key is set)

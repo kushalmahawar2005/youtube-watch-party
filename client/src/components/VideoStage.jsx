@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSyncedPlayer } from '../hooks/useSyncedPlayer.js';
 import { useVideoInfo } from '../hooks/useVideoInfo.js';
 import VideoPicker from './VideoPicker.jsx';
@@ -8,15 +8,41 @@ import { REACTIONS } from '../lib/events.js';
 import { formatTime } from '../lib/youtube.js';
 import { formatViews } from '../lib/youtubeApi.js';
 import ChatPanel from './ChatPanel.jsx';
+import { thumbnailUrl } from '../lib/youtube.js';
 
 const ACTION_TEXT = { play: 'played', pause: 'paused', seek: 'jumped to', change_video: 'changed the video', join: '' };
+const REQUEST_COPY = { play: 'Play request', pause: 'Pause request', seek: 'Seek request', change_video: 'Video suggestion' };
+
+function QueuedVideo({ item }) {
+  const info = useVideoInfo(item?.videoId);
+  if (!item) return null;
+  return <li><img src={info?.thumbnail || thumbnailUrl(item.videoId)} alt="" /><span><b>{info?.title || 'Loading queued video…'}</b><em>Added by {item.addedBy.username}</em></span></li>;
+}
+
+function UpNext({ playlist }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!playlist.length) return null;
+  return (
+    <section className={`up-next ${expanded ? 'is-expanded' : ''}`}>
+      <div className="up-next-first"><img src={thumbnailUrl(playlist[0].videoId)} alt="" /><span><small>Up next · {playlist.length} queued</small><b>See what’s playing next</b><em>Auto-play is on</em></span><button onClick={() => setExpanded((open) => !open)} aria-expanded={expanded}>{expanded ? 'Hide' : 'View queue'}</button></div>
+      {expanded && <ol>{playlist.map((item) => <QueuedVideo key={item.id} item={item} />)}</ol>}
+    </section>
+  );
+}
 
 export default function VideoStage({ room }) {
   const { syncState, self, actions, reactions, notify } = room;
-  const player = useSyncedPlayer(syncState);
   const role = self.role;
   const control = canControl(role);
   const request = canRequest(role);
+  const onVideoEnded = useCallback(() => {
+    // Only the elected host advances the playlist. Other clients merely follow the broadcast.
+    if (role === 'host' && room.playlist[0]) {
+      room.notify('Starting the next queued video…', 'accent');
+      room.actions.playPlaylistItem(room.playlist[0].id);
+    }
+  }, [role, room.playlist, room.actions]);
+  const player = useSyncedPlayer(syncState, { onEnded: onVideoEnded });
   const isPlaying = syncState?.playState === 'playing';
   const info = useVideoInfo(syncState?.videoId);
 
@@ -167,47 +193,50 @@ export default function VideoStage({ room }) {
             <ChatPanel room={room} />
           </div>
         )}
-      </div>
 
-      <div className="controls card">
-        <button
-          className={`play-btn ${request ? 'is-request' : ''}`}
-          onClick={togglePlay}
-          disabled={disabled || !player.ready}
-          aria-label={isPlaying ? (request ? 'Request pause' : 'Pause') : request ? 'Request play' : 'Play'}
-          title={request ? 'Sends a request' : undefined}
-        >
-          <Icon name={isPlaying ? 'pause' : 'play'} size={20} />
-        </button>
+        <div className="controls">
+          <input
+            type="range"
+            className="seek"
+            min={0}
+            max={Math.max(duration, 1)}
+            step={0.5}
+            value={Math.min(shownTime, Math.max(duration, 1))}
+            disabled={disabled || !duration}
+            style={{ '--pct': `${duration ? (shownTime / duration) * 100 : 0}%` }}
+            onChange={(e) => setScrub(Number(e.target.value))}
+            onPointerUp={commitSeek}
+            onKeyUp={commitSeek}
+            onBlur={() => setScrub(null)}
+            aria-label="Seek"
+            aria-valuetext={`${formatTime(shownTime)} of ${formatTime(duration)}`}
+          />
 
-        <button className="icon-btn skip-btn" onClick={() => skip(-10)} disabled={disabled || !player.ready} aria-label="Back 10 seconds" title="Back 10 seconds">
-          <Icon name="skipBack" size={20} />
-          <span>10</span>
-        </button>
+          <div className="control-row">
+            <div className="control-group">
+              <button
+                className={`play-btn ${request ? 'is-request' : ''}`}
+                onClick={togglePlay}
+                disabled={disabled || !player.ready}
+                aria-label={isPlaying ? (request ? 'Request pause' : 'Pause') : request ? 'Request play' : 'Play'}
+                title={request ? 'Sends a request' : undefined}
+              >
+                <Icon name={isPlaying ? 'pause' : 'play'} size={20} />
+              </button>
 
-        <input
-          type="range"
-          className="seek"
-          min={0}
-          max={Math.max(duration, 1)}
-          step={0.5}
-          value={Math.min(shownTime, Math.max(duration, 1))}
-          disabled={disabled || !duration}
-          style={{ '--pct': `${duration ? (shownTime / duration) * 100 : 0}%` }}
-          onChange={(e) => setScrub(Number(e.target.value))}
-          onPointerUp={commitSeek}
-          onKeyUp={commitSeek}
-          onBlur={() => setScrub(null)}
-          aria-label="Seek"
-          aria-valuetext={`${formatTime(shownTime)} of ${formatTime(duration)}`}
-        />
+              <button className="icon-btn skip-btn" onClick={() => skip(-10)} disabled={disabled || !player.ready} aria-label="Back 10 seconds" title="Back 10 seconds">
+                <Icon name="skipBack" size={20} />
+                <span>10</span>
+              </button>
 
-        <span className="time">
-          {formatTime(shownTime)}
-          <span className="time-total"> / {formatTime(duration)}</span>
-        </span>
+              <span className="time">
+                {formatTime(shownTime)}
+                <span className="time-total"> / {formatTime(duration)}</span>
+              </span>
+            </div>
 
-        <div className="volume">
+            <div className="control-group control-actions">
+              <div className="volume">
           <button className="icon-btn" onClick={player.toggleMute} aria-label={player.muted ? 'Unmute' : 'Mute'}>
             <Icon name={player.muted || player.volume === 0 ? 'mute' : 'volume'} size={20} />
           </button>
@@ -221,7 +250,7 @@ export default function VideoStage({ room }) {
             onChange={(e) => player.setVolume(Number(e.target.value))}
             aria-label="Volume"
           />
-        </div>
+              </div>
 
         <button className="icon-btn skip-btn" onClick={() => skip(10)} disabled={disabled || !player.ready} aria-label="Forward 10 seconds" title="Forward 10 seconds">
           <Icon name="skipForward" size={20} />
@@ -251,6 +280,9 @@ export default function VideoStage({ room }) {
         <button className="icon-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
           <Icon name={isFullscreen ? 'compress' : 'fullscreen'} size={20} />
         </button>
+            </div>
+          </div>
+        </div>
       </div>
       </div>
 
@@ -279,6 +311,16 @@ export default function VideoStage({ room }) {
           ))}
         </div>
       </div>
+
+      {room.myRequests.length > 0 && (
+        <section className="request-status" role="status">
+          <span className="request-status-dot" />
+          <span><strong>{REQUEST_COPY[room.myRequests[0].type] || 'Request'} pending</strong> — waiting for a host or moderator</span>
+          <button onClick={() => room.actions.cancelRequest(room.myRequests[0].id)}>Cancel</button>
+        </section>
+      )}
+
+      <UpNext playlist={room.playlist} />
 
       {!disabled && (
         <VideoPicker control={control} currentVideoId={syncState?.videoId} onPick={pickVideo} notify={notify} />

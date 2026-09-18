@@ -14,13 +14,15 @@ const EMBED_ERRORS = { 2: 'Invalid video id.', 5: 'HTML5 player error.', 100: 'V
  * client (including the one who clicked) applies it here. Because we never
  * emit from onStateChange there is no echo loop.
  */
-export function useSyncedPlayer(syncState, { onEnded } = {}) {
+export function useSyncedPlayer(syncState, { onEnded, onNativePlaybackChange } = {}) {
   const containerRef = useRef(null);
   const playerRef = useRef(null);
   const readyRef = useRef(false);
   const syncRef = useRef(null); // { state, receivedAt }
   const stuckSinceRef = useRef(null);
   const onEndedRef = useRef(onEnded);
+  const onNativePlaybackChangeRef = useRef(onNativePlaybackChange);
+  const applyingUntilRef = useRef(0);
 
   const [ready, setReady] = useState(false);
   const [time, setTime] = useState(0);
@@ -34,6 +36,7 @@ export function useSyncedPlayer(syncState, { onEnded } = {}) {
   const hasState = Boolean(syncState);
 
   useEffect(() => { onEndedRef.current = onEnded; }, [onEnded]);
+  useEffect(() => { onNativePlaybackChangeRef.current = onNativePlaybackChange; }, [onNativePlaybackChange]);
 
   /** Where the video SHOULD be right now, based on the last server update. */
   const expectedTime = useCallback(() => {
@@ -60,6 +63,9 @@ export function useSyncedPlayer(syncState, { onEnded } = {}) {
 
     if (Math.abs((player.getCurrentTime?.() ?? 0) - target) > SEEK_TOLERANCE) player.seekTo(target, true);
     player.setPlaybackRate?.(playbackRate);
+    // State changes caused by our own server update must not be treated as a
+    // viewer clicking YouTube's built-in play/pause button.
+    applyingUntilRef.current = performance.now() + 900;
     if (state.playState === 'playing') player.playVideo();
     else player.pauseVideo();
   }, [expectedTime, playbackRate]);
@@ -113,6 +119,19 @@ export function useSyncedPlayer(syncState, { onEnded } = {}) {
               stuckSinceRef.current = null;
             }
             if (e.data === YT_STATE.ENDED) onEndedRef.current?.();
+            if (
+              (e.data === YT_STATE.PLAYING || e.data === YT_STATE.PAUSED)
+              && performance.now() > applyingUntilRef.current
+            ) {
+              const nativeIsPlaying = e.data === YT_STATE.PLAYING;
+              const serverIsPlaying = syncRef.current?.state?.playState === 'playing';
+              if (nativeIsPlaying !== serverIsPlaying) {
+                onNativePlaybackChangeRef.current?.({
+                  isPlaying: nativeIsPlaying,
+                  time: player.getCurrentTime?.() ?? 0,
+                });
+              }
+            }
             setTitle(player.getVideoData?.()?.title || '');
           },
           onError: (e) => setPlayerError(EMBED_ERRORS[e.data] || 'This video cannot be played.'),

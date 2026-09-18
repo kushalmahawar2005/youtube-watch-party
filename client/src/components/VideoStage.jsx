@@ -35,6 +35,7 @@ export default function VideoStage({ room }) {
   const role = self.role;
   const control = canControl(role);
   const request = canRequest(role);
+  const isPlaying = syncState?.playState === 'playing';
   const onVideoEnded = useCallback(() => {
     // Only the elected host advances the playlist. Other clients merely follow the broadcast.
     if (role === 'host' && room.playlist[0]) {
@@ -42,8 +43,16 @@ export default function VideoStage({ room }) {
       room.actions.playPlaylistItem(room.playlist[0].id);
     }
   }, [role, room.playlist, room.actions]);
-  const player = useSyncedPlayer(syncState, { onEnded: onVideoEnded });
-  const isPlaying = syncState?.playState === 'playing';
+  const onNativePlaybackChange = useCallback(({ isPlaying: nativeIsPlaying, time }) => {
+    if (nativeIsPlaying === isPlaying) return;
+    const type = nativeIsPlaying ? 'play' : 'pause';
+    if (control) actions[type](time);
+    else if (request) actions.requestAction(type, {});
+  }, [actions, control, isPlaying, request]);
+  const player = useSyncedPlayer(syncState, {
+    onEnded: onVideoEnded,
+    onNativePlaybackChange,
+  });
   const info = useVideoInfo(syncState?.videoId);
 
   const [scrub, setScrub] = useState(null); // seconds while dragging
@@ -130,8 +139,8 @@ export default function VideoStage({ room }) {
       <div className="player-shell" ref={fullscreenRef}>
       <div className="screen">
         <div className="player-mount" ref={player.containerRef} />
-        {/* transparent shield: nobody clicks the iframe directly, all control goes through the server */}
-        <div className="screen-shield" onDoubleClick={control ? togglePlay : undefined} />
+        {/* Let the familiar YouTube tap target work too; its state change is relayed to the room. */}
+        <div className="screen-shield" aria-hidden="true" />
 
         {!player.ready && <div className="screen-overlay"><div className="loader"><i /><i /><i /></div></div>}
         {player.playerError && (
@@ -194,7 +203,7 @@ export default function VideoStage({ room }) {
           </div>
         )}
 
-        <div className="controls">
+        <div className={`controls ${!isPlaying ? 'is-paused' : ''}`}>
           <input
             type="range"
             className="seek"

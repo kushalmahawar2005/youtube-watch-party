@@ -1,13 +1,18 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { io as connect } from 'socket.io-client';
 import { createApp } from '../src/app.js';
+import { Room } from '../src/models/Room.js';
+import { RoomStore } from '../src/services/RoomStore.js';
 
 let server, url;
 const sockets = [];
 
 before(async () => {
-  ({ server } = createApp({ socketOptions: { disconnectGraceMs: 200 } }));
+  ({ server } = createApp({ socketOptions: { disconnectGraceMs: 200 }, persistencePath: null }));
   await new Promise((r) => server.listen(0, r));
   url = `http://localhost:${server.address().port}`;
 });
@@ -45,6 +50,45 @@ test('creator becomes host, joiner becomes participant', async () => {
   assert.equal(hostJoin.self.role, 'host');
   assert.equal(guestJoin.self.role, 'participant');
   assert.equal(guestJoin.participants.length, 2);
+});
+
+test('room snapshots restore settings, participants and chat after a restart', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watch-party-rooms-'));
+  try {
+    const store = new RoomStore(path.join(tempDir, 'rooms.json'));
+    const room = new Room('SAVED1', 'host_saved_1');
+    const { participant } = room.join('host_saved_1', 'Host');
+    room.updateMeta({ title: 'Saved party', emoji: '🍿', password: 'safe-password' });
+    room.addChatMessage(participant, 'See you after the restart');
+    store.save([room.toSnapshot()]);
+
+    const restored = Room.fromSnapshot(store.load()[0]);
+    assert.equal(restored.title, 'Saved party');
+    assert.equal(restored.emoji, '🍿');
+    assert.equal(restored.verifyPassword('safe-password'), true);
+    assert.equal(restored.listParticipants()[0].username, 'Host');
+    assert.equal(restored.chat[0].text, 'See you after the restart');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('host can name and protect a room; new guests need its password', async () => {
+  const { host, guest, roomId } = await setupRoom();
+  const updated = once(guest, 'room_updated');
+  const settings = await emit(host, 'update_room', { title: 'Friday movie night', emoji: '🍿', password: 'secret-pass' });
+  assert.equal(settings.ok, true);
+  assert.deepEqual(await updated, { title: 'Friday movie night', emoji: '🍿', isPrivate: true });
+
+  const lockedOut = client();
+  const denied = await emit(lockedOut, 'join_room', { roomId, userId: 'locked_out_1', username: 'Nope' });
+  assert.equal(denied.error.code, 'PASSWORD_REQUIRED');
+
+  const invited = client();
+  const accepted = await emit(invited, 'join_room', { roomId, userId: 'invited_user_1', username: 'Friend', password: 'secret-pass' });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.roomMeta.title, 'Friday movie night');
+  assert.equal(accepted.roomMeta.isPrivate, true);
 });
 
 test('host play is broadcast to everyone', async () => {
@@ -86,10 +130,57 @@ test('participant request is approved by host and applied', async () => {
   const request = await created;
 
   const resolved = once(guest, 'request_resolved');
-  const synced = once(guest, 'sync_state');
+  const synced = new Promise((resolve) => guest.on('sync_state', (state) => state.action === 'change_video' && resolve(state)));
   await emit(host, 'resolve_request', { requestId: request.id, approve: true });
   assert.equal((await resolved).approved, true);
   assert.equal((await synced).videoId, 'dQw4w9WgXcQ');
+});
+
+test('participant can cancel a request and staff receives a resolved request history', async () => {
+  const { host, guest } = await setupRoom();
+  const first = await emit(guest, 'request_action', { type: 'pause', payload: {} });
+  assert.equal(first.ok, true);
+  const cancelled = once(host, 'request_cancelled');
+  assert.equal((await emit(guest, 'cancel_request', { requestId: first.requestId })).ok, true);
+  assert.equal((await cancelled).requestId, first.requestId);
+
+  const second = await emit(guest, 'request_action', { type: 'play', payload: {} });
+  const snapshot = once(host, 'requests_snapshot');
+  await emit(host, 'resolve_request', { requestId: second.requestId, approve: false });
+  const data = await snapshot;
+  assert.equal(data.requests.length, 0);
+  assert.equal(data.history[0].id, second.requestId);
+  assert.equal(data.history[0].approved, false);
+});
+
+test('host manages an Up Next playlist and playing an item synchronizes everyone', async () => {
+  const { host, guest } = await setupRoom();
+  const updated = once(guest, 'playlist_updated');
+  assert.equal((await emit(host, 'add_to_playlist', { videoId: 'dQw4w9WgXcQ' })).ok, true);
+  const item = (await updated).playlist[0];
+  assert.equal(item.videoId, 'dQw4w9WgXcQ');
+  assert.equal((await emit(guest, 'add_to_playlist', { videoId: 'M7lc1UVf-VE' })).error.code, 'FORBIDDEN');
+
+  const synced = once(guest, 'sync_state');
+  const removed = once(guest, 'playlist_updated');
+  assert.equal((await emit(host, 'play_playlist_item', { itemId: item.id })).ok, true);
+  assert.equal((await synced).videoId, 'dQw4w9WgXcQ');
+  assert.equal((await removed).playlist.length, 0);
+});
+
+test('host can reorder playlist items while participants cannot', async () => {
+  const { host, guest } = await setupRoom();
+  const firstAdded = once(guest, 'playlist_updated');
+  await emit(host, 'add_to_playlist', { videoId: 'dQw4w9WgXcQ' });
+  await firstAdded;
+  const secondAdded = once(guest, 'playlist_updated');
+  await emit(host, 'add_to_playlist', { videoId: 'M7lc1UVf-VE' });
+  const before = await secondAdded;
+  const second = before.playlist[1];
+  assert.equal((await emit(guest, 'move_playlist_item', { itemId: second.id, direction: 'up' })).error.code, 'FORBIDDEN');
+  const moved = once(guest, 'playlist_updated');
+  assert.equal((await emit(host, 'move_playlist_item', { itemId: second.id, direction: 'up' })).ok, true);
+  assert.equal((await moved).playlist[0].id, second.id);
 });
 
 test('host removes participant; they cannot rejoin', async () => {

@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { createApp } from './app.js';
 
 // Local dev: read the repo-root .env (on Render, env vars are set in the dashboard instead)
 try {
@@ -6,8 +7,6 @@ try {
 } catch {
   /* no .env file */
 }
-
-const { createApp } = await import('./app.js');
 
 const PORT = Number(process.env.PORT) || 3001;
 // Comma-separated list of allowed frontend origins. Not needed when the server serves the client itself.

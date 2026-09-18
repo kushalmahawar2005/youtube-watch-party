@@ -411,10 +411,23 @@ input[type='range']:focus-visible { outline-offset: 4px; border-radius: 4px; }
 .fullscreen-chat-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--line); }
 .fullscreen-chat .chat { height: min(520px, 62dvh); }
 .player-shell:fullscreen, .player-shell:-webkit-full-screen {
-  display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100vw; height: 100vh; height: 100dvh; padding: 16px; background: #000;
+  display: block; position: relative; width: 100vw; height: 100vh; height: 100dvh; padding: 0; background: #000;
 }
-.player-shell:fullscreen .screen, .player-shell:-webkit-full-screen .screen { aspect-ratio: auto; min-height: 0; height: 100%; border-radius: var(--radius); }
-.player-shell:fullscreen .controls, .player-shell:-webkit-full-screen .controls { border-radius: var(--radius); }
+.player-shell:fullscreen .screen, .player-shell:-webkit-full-screen .screen {
+  position: absolute; inset: 0; aspect-ratio: auto; min-height: 0; height: 100%; border-radius: 0;
+}
+.player-shell:fullscreen .controls, .player-shell:-webkit-full-screen .controls {
+  position: absolute; z-index: 10; right: 0; bottom: 0; left: 0; border: 0; border-radius: 0; padding: 28px 24px 18px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.88)); box-shadow: none;
+}
+.player-shell:fullscreen .controls .seek, .player-shell:-webkit-full-screen .controls .seek { order: 1; flex: 1 1 auto; width: auto; }
+.player-shell:fullscreen .controls .play-btn, .player-shell:-webkit-full-screen .controls .play-btn { order: 0; }
+.player-shell:fullscreen .controls .skip-btn, .player-shell:-webkit-full-screen .controls .skip-btn { order: 0; }
+.player-shell:fullscreen .controls .time, .player-shell:-webkit-full-screen .controls .time { order: 2; }
+.player-shell:fullscreen .controls .volume, .player-shell:-webkit-full-screen .controls .volume { order: 3; }
+.player-shell:fullscreen .controls .speed-menu, .player-shell:-webkit-full-screen .controls .speed-menu { order: 4; }
+.player-shell:fullscreen .controls .fullscreen-chat-toggle, .player-shell:-webkit-full-screen .controls .fullscreen-chat-toggle { order: 5 !important; }
+.player-shell:fullscreen .controls > .icon-btn:last-child, .player-shell:-webkit-full-screen .controls > .icon-btn:last-child { order: 6; }
 
 /* title + meta + reactions */
 .stage-info { display: grid; gap: 14px; padding: 4px 2px; }

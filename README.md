@@ -37,7 +37,6 @@ Watch YouTube videos together in real time. The host (and moderators) control pl
 ```
 youtube-watch-party/
 ├── package.json            # root scripts (build / start for deployment)
-├── render.yaml             # Render deploy blueprint
 ├── server/
 │   ├── src/
 │   │   ├── index.js            # entry: starts HTTP + Socket.IO
@@ -101,24 +100,22 @@ npm test
 
 Covers: host/participant assignment, broadcast, permission rejection, promote to moderator, request + approve, remove + no rejoin, transfer host, late-join state, host disconnect → new host, chat.
 
-## Deploy (Render, one service)
+## Deploy (Hostinger, one service)
 
 1. Push this folder to a GitHub repo.
-2. On [render.com](https://render.com) → **New → Blueprint** → pick the repo (uses `render.yaml`).
-   Or **New → Web Service**: Build `npm run build`, Start `npm start`, env `NODE_VERSION=22`.
-3. Open the deployed URL, then verify room creation, joining from another browser, and synchronized playback.
+2. In Hostinger Node.js hosting, connect the repository and use Node.js 22 (or newer compatible version).
+3. Set the build command to `npm run build` and the start command to `npm start`.
+4. Add `YOUTUBE_API_KEY` in Hostinger environment variables. It remains server-side; the browser only calls `/api/youtube/*`.
+5. Open the deployed URL, then verify room creation, joining from another browser, and synchronized playback.
 
 Why one service: React build, REST API and WebSocket share one origin, so no CORS setup and a single URL.
-Set `YOUTUBE_API_KEY` in the Render dashboard (Environment). It is never sent to the browser: the client calls `/api/youtube/*` on our server.
-Note: Render's free plan sleeps after ~15 min idle (first load takes ~30-50 s). The app writes snapshots to disk, but use a persistent disk/database for production-grade durability.
-
-**Split deploy (optional):** frontend on Vercel/Netlify with `VITE_SERVER_URL=https://<backend>.onrender.com`, backend on Render/Railway with `CLIENT_ORIGIN=https://<frontend-domain>`. Vercel serverless functions can't hold WebSocket connections, so the backend must live on Render/Railway.
+The app writes snapshots to disk. Attach persistent storage or use a database for production-grade durability.
 
 ## Environment variables
 
 | Name | Where | Purpose |
 |---|---|---|
-| `PORT` | server | Port (Render sets it automatically) |
+| `PORT` | server | HTTP port (set by Hostinger or your server configuration) |
 | `YOUTUBE_API_KEY` | server | YouTube Data API v3 key. Enables search + video details. Without it, pasting links still works |
 | `CLIENT_ORIGIN` | server | Allowed frontend origin(s) for CORS, only for split deploy |
 | `VITE_SERVER_URL` | client (build) | Backend URL, only for split deploy |

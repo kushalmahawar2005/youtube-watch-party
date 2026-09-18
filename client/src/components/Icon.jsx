@@ -7,6 +7,24 @@ const PATHS = {
       <rect x="13.5" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" />
     </>
   ),
+  skipBack: <path d="M9 7H4v5M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4 9.5" />,
+  skipForward: <path d="M15 7h5v5M19.5 12a7.5 7.5 0 1 1-2.2-5.3L20 9.5" />,
+  fullscreen: (
+    <>
+      <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M20 16v4h-4" />
+    </>
+  ),
+  compress: (
+    <>
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </>
+  ),
+  chat: (
+    <>
+      <path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.7 8.7 0 0 1-3.2-.6L4 20l1.6-3.7A7.2 7.2 0 0 1 4 11.5 7.5 7.5 0 0 1 12 4a7.5 7.5 0 0 1 8 7.5Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01" />
+    </>
+  ),
   volume: (
     <>
       <path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" fill="currentColor" />

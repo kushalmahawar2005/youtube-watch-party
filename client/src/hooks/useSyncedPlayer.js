@@ -29,6 +29,7 @@ export function useSyncedPlayer(syncState) {
   const [playerError, setPlayerError] = useState(null);
   const [muted, setMuted] = useState(false);
   const [volume, setVolumeState] = useState(80);
+  const [playbackRate, setPlaybackRateState] = useState(1);
   const hasState = Boolean(syncState);
 
   /** Where the video SHOULD be right now, based on the last server update. */
@@ -55,9 +56,10 @@ export function useSyncedPlayer(syncState) {
     }
 
     if (Math.abs((player.getCurrentTime?.() ?? 0) - target) > SEEK_TOLERANCE) player.seekTo(target, true);
+    player.setPlaybackRate?.(playbackRate);
     if (state.playState === 'playing') player.playVideo();
     else player.pauseVideo();
-  }, [expectedTime]);
+  }, [expectedTime, playbackRate]);
 
   // 1) every new sync_state from the server
   useEffect(() => {
@@ -97,6 +99,7 @@ export function useSyncedPlayer(syncState) {
           onReady: () => {
             readyRef.current = true;
             player.setVolume(80);
+            player.setPlaybackRate(playbackRate);
             setTitle(player.getVideoData?.()?.title || '');
             setReady(true);
             applySync();
@@ -189,6 +192,13 @@ export function useSyncedPlayer(syncState) {
     }
   }, []);
 
+  const setPlaybackRate = useCallback((rate) => {
+    const nextRate = Number(rate);
+    if (!Number.isFinite(nextRate)) return;
+    setPlaybackRateState(nextRate);
+    playerRef.current?.setPlaybackRate?.(nextRate);
+  }, []);
+
   const getCurrentTime = useCallback(() => playerRef.current?.getCurrentTime?.() ?? expectedTime(), [expectedTime]);
 
   return {
@@ -204,6 +214,8 @@ export function useSyncedPlayer(syncState) {
     toggleMute,
     volume,
     setVolume,
+    playbackRate,
+    setPlaybackRate,
     getCurrentTime,
   };
 }

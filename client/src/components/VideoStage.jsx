@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSyncedPlayer } from '../hooks/useSyncedPlayer.js';
 import { useVideoInfo } from '../hooks/useVideoInfo.js';
 import VideoPicker from './VideoPicker.jsx';
@@ -7,6 +7,7 @@ import { canControl, canRequest } from '../lib/permissions.js';
 import { REACTIONS } from '../lib/events.js';
 import { formatTime } from '../lib/youtube.js';
 import { formatViews } from '../lib/youtubeApi.js';
+import ChatPanel from './ChatPanel.jsx';
 
 const ACTION_TEXT = { play: 'played', pause: 'paused', seek: 'jumped to', change_video: 'changed the video', join: '' };
 
@@ -20,6 +21,10 @@ export default function VideoStage({ room }) {
   const info = useVideoInfo(syncState?.videoId);
 
   const [scrub, setScrub] = useState(null); // seconds while dragging
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [showFullscreenChat, setShowFullscreenChat] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenRef = useRef(null);
 
   const duration = player.duration || 0;
   const shownTime = scrub ?? player.time;
@@ -50,6 +55,30 @@ export default function VideoStage({ room }) {
     else actions.requestAction('change_video', { videoId });
   }
 
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+      return;
+    }
+    const element = fullscreenRef.current;
+    (element?.requestFullscreen || element?.webkitRequestFullscreen)?.call(element);
+  }
+
+  function selectSpeed(rate) {
+    player.setPlaybackRate(rate);
+    setSpeedOpen(false);
+  }
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const active = document.fullscreenElement === fullscreenRef.current;
+      setIsFullscreen(active);
+      if (!active) setShowFullscreenChat(false);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
+
   // keyboard: space = play/pause, arrows = ±10s (host/mod only)
   useEffect(() => {
     if (!control) return undefined;
@@ -72,6 +101,7 @@ export default function VideoStage({ room }) {
 
   return (
     <section className="stage" aria-label="Video">
+      <div className="player-shell" ref={fullscreenRef}>
       <div className="screen">
         <div className="player-mount" ref={player.containerRef} />
         {/* transparent shield: nobody clicks the iframe directly, all control goes through the server */}
@@ -125,6 +155,18 @@ export default function VideoStage({ room }) {
             {request ? 'Controls send a request to the host' : 'View only'}
           </div>
         )}
+
+        {isFullscreen && showFullscreenChat && (
+          <div className="fullscreen-chat card">
+            <div className="fullscreen-chat-head">
+              <strong>Room chat</strong>
+              <button className="icon-btn" onClick={() => setShowFullscreenChat(false)} aria-label="Close chat">
+                <Icon name="close" size={18} />
+              </button>
+            </div>
+            <ChatPanel room={room} />
+          </div>
+        )}
       </div>
 
       <div className="controls card">
@@ -136,6 +178,11 @@ export default function VideoStage({ room }) {
           title={request ? 'Sends a request' : undefined}
         >
           <Icon name={isPlaying ? 'pause' : 'play'} size={20} />
+        </button>
+
+        <button className="icon-btn skip-btn" onClick={() => skip(-10)} disabled={disabled || !player.ready} aria-label="Back 10 seconds" title="Back 10 seconds">
+          <Icon name="skipBack" size={20} />
+          <span>10</span>
         </button>
 
         <input
@@ -175,6 +222,36 @@ export default function VideoStage({ room }) {
             aria-label="Volume"
           />
         </div>
+
+        <button className="icon-btn skip-btn" onClick={() => skip(10)} disabled={disabled || !player.ready} aria-label="Forward 10 seconds" title="Forward 10 seconds">
+          <Icon name="skipForward" size={20} />
+          <span>10</span>
+        </button>
+
+        <div className="control-menu speed-menu">
+          <button className="icon-btn speed-btn" onClick={() => setSpeedOpen((open) => !open)} aria-label={`Playback speed ${player.playbackRate}x`} title="Playback speed">
+            <span>{player.playbackRate}x</span>
+          </button>
+          {speedOpen && (
+            <div className="speed-options" role="menu">
+              {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
+                <button key={rate} className={rate === player.playbackRate ? 'is-selected' : ''} onClick={() => selectSpeed(rate)} role="menuitem">
+                  {rate}x
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {isFullscreen && (
+          <button className={`icon-btn fullscreen-chat-toggle ${showFullscreenChat ? 'is-active' : ''}`} onClick={() => setShowFullscreenChat((open) => !open)} aria-label="Toggle chat" title="Chat">
+            <Icon name="chat" size={20} />
+          </button>
+        )}
+        <button className="icon-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}>
+          <Icon name={isFullscreen ? 'compress' : 'fullscreen'} size={20} />
+        </button>
+      </div>
       </div>
 
       <div className="stage-info">

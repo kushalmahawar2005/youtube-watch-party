@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useLocation, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import RoomSession from '../components/RoomSession.jsx';
 import NameGate from '../components/NameGate.jsx';
 import { getSavedName, getUserId, resetUserId, saveName } from '../lib/identity.js';
@@ -11,10 +11,9 @@ import { getSavedName, getUserId, resetUserId, saveName } from '../lib/identity.
  */
 export default function Room() {
   const { roomId } = useParams();
-  const location = useLocation();
   const saved = getSavedName();
   const [userId, setUserId] = useState(getUserId);
-  const [username, setUsername] = useState(location.state?.autoJoin && saved ? saved : '');
+  const [username, setUsername] = useState(saved);
 
   if (!username) {
     return (

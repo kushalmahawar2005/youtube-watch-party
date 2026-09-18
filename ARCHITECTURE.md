@@ -44,8 +44,9 @@ Host clicks ▶
   every client (including the host) → player.seekTo(42.3) + player.playVideo()
 ```
 
-**No echo loop:** clients never emit from the YouTube player's `onStateChange`. Only buttons emit.
-The player is only driven by `sync_state`, so applying an update can't trigger another update.
+**No echo loop:** custom controls emit playback events directly. A direct tap on YouTube's own
+play/pause target is also relayed to the server, but client-applied `sync_state` updates are
+briefly suppressed so they cannot echo back as a second event.
 
 **Time math:** the server saves `position` + `updatedAt` instead of running a timer.
 Live time = `position + (now − updatedAt) / 1000` while playing. A late joiner gets that value.
@@ -92,10 +93,13 @@ Host and moderators also join a private channel `ROOMID:staff`, so only they rec
 - **Empty rooms** are deleted (immediately when the last person leaves, after 10 min if never joined).
 - **Validation:** video id regex, time range, name/chat length, role whitelist, reaction rate limit.
 
-## 7. Trade-offs and scaling
+## 7. Persistence, trade-offs and scaling
 
-- **In-memory state:** simple and fast, but rooms vanish on restart and it only works on one server instance.
-  Next step: store rooms in Redis or Postgres.
+- **File-backed snapshots:** `RoomStore` writes room metadata, playback state, participants, chat,
+  requests and playlist data to `data/rooms.json`. It survives a process restart when the host keeps
+  the same disk. It is deliberately ignored by Git because it contains live room data.
+- **Production durability:** local disk is not enough for multiple instances or ephemeral hosts.
+  The next step is Redis or Postgres for shared, durable state.
 - **Scaling to 1,000+ users on multiple instances:** add `@socket.io/redis-adapter` so `io.to(room).emit`
   reaches sockets on every instance, move `Room` state to Redis, and use sticky sessions on the load balancer.
 - **Identity:** random `userId` per tab, no login. Enough for the assignment; real auth would use JWT sessions.
@@ -110,10 +114,9 @@ VideoPicker ── GET /api/youtube/search?q=lofi ──▶ Express ──▶ Yo
                                                                (TTL cache)
 ```
 
-- `search.list` costs **100 quota units** (default daily quota: 10,000), so search runs only on Enter
-  (not on every keystroke) and results are cached for 30 min. `videos.list` costs 1 unit and is cached for 6 h.
+- `search.list` costs **100 quota units** (default daily quota: 10,000), so autocomplete is debounced
+  while typing and results are cached for 30 min. `videos.list` costs 1 unit and is cached for 6 h.
 - Search results are filtered to **embeddable** videos, so everything in the list can play in the IFrame player.
 - Search is only a way to pick a `videoId`. Syncing still goes through the same `change_video` / `request_action`
   socket events, so the role checks on the backend are unchanged.
 - Without `YOUTUBE_API_KEY`, `/api/config` returns `youtubeSearch: false` and the UI falls back to pasting links.
-
